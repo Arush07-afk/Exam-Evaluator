@@ -11,7 +11,6 @@ import pytesseract
 from pdf2image import convert_from_path
 from PIL import Image
 from typing import List, Dict
-import easyocr
 
 # Try to import easyocr, but don't fail if not available
 try:
