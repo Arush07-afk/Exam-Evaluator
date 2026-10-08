@@ -13,15 +13,22 @@ from PIL import Image
 from typing import List, Dict
 import easyocr
 
-# Initialize EasyOCR reader (English only, runs on CPU)
+# Try to import easyocr, but don't fail if not available
+try:
+    import easyocr
+    _EASYOCR_AVAILABLE = True
+except ImportError:
+    _EASYOCR_AVAILABLE = False
+
 _easyocr_reader = None
 
 def get_easyocr():
     global _easyocr_reader
+    if not _EASYOCR_AVAILABLE:
+        return None
     if _easyocr_reader is None:
         _easyocr_reader = easyocr.Reader(['en'], gpu=False)
     return _easyocr_reader
-
 
 class OCRProcessor:
     def __init__(self, tesseract_cmd: str = None):
@@ -75,34 +82,39 @@ class OCRProcessor:
 
     # ---------- Public API ----------
     def extract_text(self, file_path: str) -> str:
-        """Extract text using EasyOCR first, fall back to Tesseract"""
+        """Extract text using EasyOCR if available, otherwise Tesseract"""
         ext = os.path.splitext(file_path)[1].lower()
-        try:
-            reader = get_easyocr()
-            if ext == ".pdf":
-                pages = self._load_pages_as_images(file_path)
-                full_text = []
-                for page in pages:
-                    results = reader.readtext(page, detail=0)
-                    full_text.append(" ".join(results))
-                return "\n".join(full_text)
-            else:
-                results = reader.readtext(file_path, detail=0)
-                return " ".join(results)
-        except Exception as e:
-            print(f"EasyOCR failed: {e}, falling back to Tesseract")
-            if ext == ".pdf":
-                pages = self._load_pages_as_images(file_path)
-                full_text = []
-                for page in pages:
-                    processed = self.preprocess_image(page)
-                    text = pytesseract.image_to_string(processed, config="--oem 3 --psm 6")
-                    full_text.append(text)
-                return "\n".join(full_text)
-            else:
-                img = cv2.imread(file_path)
-                processed = self.preprocess_image(img)
-                return pytesseract.image_to_string(processed, config="--oem 3 --psm 6")
+        
+        # Try EasyOCR only if available (local dev)
+        if _EASYOCR_AVAILABLE:
+            try:
+                reader = get_easyocr()
+                if reader and ext == ".pdf":
+                    pages = self._load_pages_as_images(file_path)
+                    full_text = []
+                    for page in pages:
+                        results = reader.readtext(page, detail=0)
+                        full_text.append(" ".join(results))
+                    return "\n".join(full_text)
+                elif reader:
+                    results = reader.readtext(file_path, detail=0)
+                    return " ".join(results)
+            except Exception as e:
+                print(f"EasyOCR failed: {e}, falling back to Tesseract")
+        
+        # Fallback to Tesseract (production default)
+        if ext == ".pdf":
+            pages = self._load_pages_as_images(file_path)
+            full_text = []
+            for page in pages:
+                processed = self.preprocess_image(page)
+                text = pytesseract.image_to_string(processed, config="--oem 3 --psm 6")
+                full_text.append(text)
+            return "\n".join(full_text)
+        else:
+            img = cv2.imread(file_path)
+            processed = self.preprocess_image(img)
+            return pytesseract.image_to_string(processed, config="--oem 3 --psm 6")
 
     def extract_roll_number(self, text: str) -> str:
         # Try to find CBSE-like patterns in messy OCR text
